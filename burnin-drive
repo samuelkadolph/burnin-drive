@@ -79,7 +79,7 @@ function run_badblocks {
   puts "===== Start badblocks on $dev"
 
   if [[ "$RUN" == "1" ]]; then
-    badblocks -wsv -b 4096 -o "$bb_file" "$dev" 2>&1
+    badblocks -wv -b 4096 -o "$bb_file" "$dev" 2>&1 | puts
   else
     puts "Not running badblocks because this is a dry run"
   fi
@@ -166,6 +166,21 @@ done
 
 eval set -- "$args"
 
+if [[ $EUID -ne 0 ]]; then
+  echo "$0 must be run as root" 1>&2
+  exit 1
+fi
+
+if ! command -v smartctl &>/dev/null; then
+  echo "could not find smartctl, please install it" 1>&2
+  exit 1
+fi
+
+if ! command -v badblocks &>/dev/null; then
+  echo "could not find badblocks, please install it" 1>&2
+  exit 1
+fi
+
 if [[ $# -ne 1 ]]; then
   echo "drive name must be provided" 1>&2
   usage
@@ -204,15 +219,17 @@ if [[ "$CONSENT" != "1" ]]; then
   fi
 fi
 
+dir=${{DIR%%/}}
+
 if [[ "$LOG" == "auto" ]]; then
-  bb_file="$DIR/burnin_${1}_${make}_${model}_${serial}.badblocks"
-  log_file="$DIR/burnin_${1}_${make}_${model}_${serial}.log"
+  bb_file="$dir/burnin_${make}_${model}_${serial}.badblocks"
+  log_file="$dir/burnin_${make}_${model}_${serial}.log"
 else
-  bb_file="$DIR/$LOG.badblocks"
-  log_file="$DIR/$LOG.log"
+  bb_file="$dir/$LOG.badblocks"
+  log_file="$dir/$LOG.log"
 fi
 
-[[ ! -d "$DIR" ]] && mkdir -p "$DIR"
+[[ ! -d "$dir" ]] && mkdir -p "$dir"
 
 rm -f "$bb_file"
 rm -f "$log_file"
