@@ -8,9 +8,11 @@ use or in case of a RMA.
 ```
 git clone https://github.com/samuelkadolph/burnin-drive
 cd burnin-drive
-burnin-drive --run --yes daXX
+sudo ./burnin-drive --run --yes sdX
 ```
 
 ## Tested Drives
 
+* HGST HUH728080AL4200
+* SEAGATE ST8000NM0075
 * WDC WUH721414AL5204
