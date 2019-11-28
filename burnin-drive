@@ -124,7 +124,7 @@ RUN=${RUN:-0}
 SMART_LONG_POLL=$((15*60))
 SMART_SHORT_POLL=30
 
-args=""
+args=()
 
 while (( "$#" )); do
   case "$1" in
@@ -158,13 +158,13 @@ while (( "$#" )); do
       exit 1
       ;;
     *)
-      args="$args $1"
+      args+=("$1")
       shift
       ;;
   esac
 done
 
-eval set -- "$args"
+set -- "${args[@]}"
 
 if [[ $EUID -ne 0 ]]; then
   echo "$0 must be run as root" 1>&2
