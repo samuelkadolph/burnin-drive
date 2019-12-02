@@ -55,7 +55,8 @@ function poll_smart_test {
   puts "Waiting for SMART Test to finish"
 
   while true; do
-    if smartctl --log selftest "$dev" | grep "# 1" | grep -v "Self test in progress" >/dev/null; then
+    if smartctl --log selftest "$dev" | grep "# 1" | grep -v "Self test in progress" >/dev/null &&
+       smartctl --capabilities "$dev" | grep "Self-test execution status" | grep -v "Self-test routine in progress" >/dev/null; then
       return
     fi
 
@@ -244,6 +245,9 @@ puts "badblocks File: $bb_file"
 puts "Log File: $log_file"
 puts "Passes: $PASSES"
 puts "Dry Run: $([ "$RUN" == 1 ] && echo "No" || echo "Yes")"
+
+puts "===== Raw SMART Info"
+my_smartctl --info "$dev"
 
 run_smart_test short
 run_badblocks
