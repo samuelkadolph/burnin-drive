@@ -27,8 +27,8 @@
 
 function find_make {
                       make=$(echo "$1" | sed -nr 's/^Vendor: +(.*)$/\1/p')
-  [[ -z "$make" ]] && make=$(echo "$1" | sed -nr 's/^Device Model: +([^ ]+)/\1/p')
-  [[ -z "$make" ]] && make=$(echo "$1" | sed -nr 's/^Model Number: +([^ ]+)/\1/p')
+  [[ -z "$make" ]] && make=$(echo "$1" | sed -nr 's/^Device Model: +([^ ]+).*$/\1/p')
+  [[ -z "$make" ]] && make=$(echo "$1" | sed -nr 's/^Model Number: +([^ ]+).*$/\1/p')
 
   echo "$make"
 }
@@ -219,7 +219,7 @@ if [[ "$CONSENT" != "1" ]]; then
   fi
 fi
 
-dir=${{DIR%%/}}
+dir=${DIR%%/}
 
 if [[ "$LOG" == "auto" ]]; then
   bb_file="$dir/burnin_${make}_${model}_${serial}.badblocks"
