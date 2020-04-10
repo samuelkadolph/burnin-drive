@@ -243,7 +243,6 @@ puts "Model: $model"
 puts "Serial: $serial"
 puts "badblocks File: $bb_file"
 puts "Log File: $log_file"
-puts "Passes: $PASSES"
 puts "Dry Run: $([ "$RUN" == 1 ] && echo "No" || echo "Yes")"
 
 puts "===== Raw SMART Info"
