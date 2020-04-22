@@ -73,9 +73,11 @@ function poll_smart_test {
 
 function puts {
   if [[ -t 0 ]]; then
-    echo "$@" | sed "s/^/$(date '+%Y-%m-%d %H:%M:%S %Z') | /"
+    echo "$@" | sed "s/^/$(date '+%Y-%m-%d %H:%M:%S %Z') | /" | tee -a "$log_file"
   else
-    sed "s/^/$(date '+%Y-%m-%d %H:%M:%S %Z') | /"
+    while read -r line; do
+      echo "$line" | sed "s/^/$(date '+%Y-%m-%d %H:%M:%S %Z') | /" | tee -a "$log_file"
+    done
   fi
 }
 
@@ -238,10 +240,8 @@ fi
 rm -f "$bb_file"
 rm -f "$log_file"
 
-exec 1> >(tee "$log_file")
-
 puts "burnin-drive"
-puts "  https://github.com/samuelkadolph/burnin-drive"
+puts "https://github.com/samuelkadolph/burnin-drive"
 
 puts "===== Run Info"
 puts "Device: $1"
