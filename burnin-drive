@@ -237,6 +237,10 @@ rm -f "$log_file"
 
 exec 1> >(tee "$log_file")
 
+puts "burnin-drive"
+puts "  https://github.com/samuelkadolph/burnin-drive"
+
+puts "===== Run Info"
 puts "Device: $1"
 puts "Make: $make"
 puts "Model: $model"
