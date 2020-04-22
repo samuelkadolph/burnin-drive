@@ -55,8 +55,11 @@ function poll_smart_test {
   puts "Waiting for SMART Test to finish"
 
   while true; do
-    if smartctl --log selftest "$dev" | grep "# 1" | grep -v "Self test in progress" >/dev/null &&
-       smartctl --capabilities "$dev" | grep "Self-test execution status" | grep -v "Self-test routine in progress" >/dev/null; then
+    if status=$(smartctl --capabilities "$dev" | grep "Self-test execution status"); then
+      if echo "$status" | grep -v "Self-test routine in progress" >/dev/null; then
+        return
+      fi
+    elif smartctl --log selftest "$dev" | grep "# 1" | grep -v "Self test in progress" >/dev/null; then
       return
     fi
 
