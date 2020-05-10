@@ -1,10 +1,25 @@
-#!/bin/bash
+#!/usr/bin/env python3
 
 # burnin-drive
 #
+# usage: burnin-drive [-h] [-d DIR] [-l LOG] [-y] [-m | -r] drive
+#
+# Burnin a drive with SMART tests and badblocks
+#
+# positional arguments:
+#   drive
+#
+# optional arguments:
+#   -h, --help         show this help message and exit
+#   -d DIR, --dir DIR  specify the output directory for the results
+#   -l LOG, --log LOG  specify the filename for the results
+#   -y, --yes          confirm consent to erase drive
+#   -m, --dry-run      perform a dry run (default)
+#   -r, --run          perform a real run
+#
 # MIT License
 #
-# Copyright (c) 2019 Samuel Kadolph
+# Copyright (c) 2020 Samuel Kadolph
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -23,239 +38,276 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
-#
 
-function find_make {
-                      make=$(echo "$1" | sed -nr 's/^Vendor: +(.*)$/\1/p')
-  [[ -z "$make" ]] && make=$(echo "$1" | sed -nr 's/^Device Model: +([^ ]+).*$/\1/p')
-  [[ -z "$make" ]] && make=$(echo "$1" | sed -nr 's/^Model Number: +([^ ]+).*$/\1/p')
+from datetime import datetime, timezone
 
-  echo "$make"
-}
+import argparse
+import errno
+import os
+import re
+import shutil
+import signal
+import subprocess
+import sys
+import time
 
-function find_model {
-                       model=$(echo "$1" | sed -nr 's/^Product: +(.*)$/\1/p')
-  [[ -z "$model" ]] && model=$(echo "$1" | sed -nr 's/^Device Model: +[^ ]+ +(.*)$/\1/p')
-  [[ -z "$model" ]] && model=$(echo "$1" | sed -nr 's/^Model Number: +[^ ]+ +(.*)$/\1/p')
+SMART_LONG_POLL = 15*60
+SMART_SHORT_POLL = 30
 
-  echo "$model" | sed 's/ /-/g'
-}
+class ProcessError(Exception):
+  def __init__(self, message):
+    self.message = message
 
-function find_serial {
-  serial=$(echo "$1" | sed -nr 's/^Serial [Nn]umber: +(.*)$/\1/p')
+def clean_smartctl(output):
+  return os.linesep.join([s for s in output.splitlines()[4:] if s is not ""])
 
-  echo "$serial"
-}
+def find_make(smartinfo):
+  match = re.search(r"^Vendor: +(.*)$", smartinfo, re.MULTILINE)
+  if match:
+    return match.group(1)
 
-function my_smartctl {
-  smartctl $@ | sed '/^smartctl/d;/^Copyright/d;/^===/d' | sed '1d;${/^$/d;}' | puts
-}
+  match = re.search(r"^Device Model: +([^ ]+).*$", smartinfo, re.MULTILINE)
+  if match:
+    return match.group(1)
 
-function poll_smart_test {
-  puts "Waiting for SMART Test to finish"
+  match = re.search(r"^Model Number: +([^ ]+).*$", smartinfo, re.MULTILINE)
+  if match:
+    return match.group(1)
 
-  while true; do
-    if status=$(smartctl --capabilities "$dev" | grep "Self-test execution status"); then
-      if echo "$status" | grep -v "Self-test routine in progress" >/dev/null; then
-        return
-      fi
-    elif smartctl --log selftest "$dev" | grep "# 1" | grep -v "Self test in progress" >/dev/null; then
-      return
-    fi
+  return None
 
-    if [[ "$1" == "long" ]]; then
-      sleep $SMART_LONG_POLL
-    else
-      sleep $SMART_SHORT_POLL
-    fi
-  done
-}
+def find_model(smartinfo):
+  match = re.search(r"^Product: +(.*)$", smartinfo, re.MULTILINE)
+  if match:
+    return match.group(1)
 
-function puts {
-  if [[ -t 0 ]]; then
-    echo "$@" | sed "s/^/$(date '+%Y-%m-%d %H:%M:%S %Z') | /" | tee -a "$log_file"
-  else
-    while read -r line; do
-      echo "$line" | sed "s/^/$(date '+%Y-%m-%d %H:%M:%S %Z') | /" | tee -a "$log_file"
-    done
-  fi
-}
+  match = re.search(r"^Device Model: +[^ ]+ +(.*)$", smartinfo, re.MULTILINE)
+  if match:
+    return match.group(1)
 
-function run_badblocks {
-  puts "===== Start badblocks on $dev"
+  match = re.search(r"^Model Number: +[^ ]+ +(.*)$", smartinfo, re.MULTILINE)
+  if match:
+    return match.group(1)
 
-  if [[ "$RUN" == "1" ]]; then
-    badblocks -wv -b 4096 -o "$bb_file" "$dev" 2>&1 | puts
-  else
-    puts "Not running badblocks because this is a dry run"
-  fi
+  return None
 
-  puts "===== Finish badblocks on $dev"
-}
+def find_serial(smartinfo):
+  match = re.search(r"^Serial [Nn]umber: +(.*)$", smartinfo, re.MULTILINE)
+  if match:
+    return match.group(1)
 
-function run_smart_test {
-  puts "===== Start SMART ${1^} Test on $dev"
+  return None
 
-  if [[ "$RUN" == "1" ]]; then
-    my_smartctl --test $1 "$dev"
-    poll_smart_test
-    puts "SMART Test finished"
-  else
-    puts "Not running SMART test because this is a dry run"
-  fi
+def get_time():
+  return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S %Z")
 
-  show_smart_data $2
+def handle_interrupt(sig, frame):
+  print("interrupted", file=sys.stderr)
+  exit(1)
 
-  puts "===== Finish SMART ${1^} Test on $dev"
-}
+def print_msg(message):
+  tee(re.sub(r"^", get_time() + " | ", message, flags=re.MULTILINE) + "\n")
 
-function show_smart_data {
-  my_smartctl --health "$dev"
-  puts
-  my_smartctl --attributes "$dev"
-  puts
-  my_smartctl --log error "$dev"
-  puts
-  my_smartctl --log selftest "$dev"
-}
+def run_badblocks():
+  print_msg("===== Start badblocks on %s" % dev)
 
-function usage {
-  echo "usage: $0 [-d|--dir output_dir] [-m|--dry-run] [-l|--log log_file] [-r|--run] [-y|--yes] drive" 1>&2
-}
+  if run:
+    run_badblocks_process("-o", bb_file_path, dev)
+  else:
+    print_msg("Not running badblocks because this is a dry run")
 
-CONSENT=${CONSENT:-0}
-DIR=${DIR:-$(pwd)}
-LOG=${LOG:-auto}
-RUN=${RUN:-0}
-SMART_LONG_POLL=$((15*60))
-SMART_SHORT_POLL=30
+  print_msg("===== Finish badblocks on %s" % dev)
 
-args=()
+def run_badblocks_process(*args):
+  proc = subprocess.Popen(["badblocks", "-svw", "-b", "4096"] + list(args), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, close_fds=True)
+  start_of_line = True
 
-while (( "$#" )); do
-  case "$1" in
-    -d|--dir)
-      DIR=$2
-      shift 2
-      ;;
-    -m|--dry-run)
-      RUN=0
-      shift
-      ;;
-    -l|--log)
-      LOG=$2
-      shift 2
-      ;;
-    -r|--run)
-      RUN=1
-      shift
-      ;;
-    -y|--yes)
-      CONSENT=1
-      shift
-      ;;
-    --)
-      shift
-      break
-      ;;
-    -*|--*=)
-      echo "unknown flag $1" 1>&2
-      usage ""
-      exit 1
-      ;;
-    *)
-      args+=("$1")
-      shift
-      ;;
-  esac
-done
+  while proc.poll() is None:
+    data = proc.stdout.read1()
+    string = data.decode("UTF-8")
+    string = string.replace("set_o_direct: Inappropriate ioctl for device\n", "")
+    lines = string.split("\n")
 
-set -- "${args[@]}"
+    for n, line in enumerate(lines):
+      if start_of_line:
+        tee("%s | " % get_time())
+        start_of_line = False
 
-if [[ $EUID -ne 0 ]]; then
-  echo "$0 must be run as root" 1>&2
-  exit 1
-fi
+      if line is not "":
+        safe_line = re.sub(r" *[\d.]+% done, [\d:]+ elapsed\. \(.* errors\)", "", line)
+        safe_line = re.sub(r"\x08+", "", safe_line)
 
-if ! command -v smartctl &>/dev/null; then
-  echo "could not find smartctl, please install it" 1>&2
-  exit 1
-fi
+        if sys.stdout.isatty():
+          sys.stdout.write(line)
+          sys.stdout.flush()
+        else:
+          sys.stdout.write(safe_line)
+          sys.stdout.flush()
 
-if ! command -v badblocks &>/dev/null; then
-  echo "could not find badblocks, please install it" 1>&2
-  exit 1
-fi
+        log_file.write(safe_line)
+        log_file.flush()
 
-if [[ $# -ne 1 ]]; then
-  echo "drive name must be provided" 1>&2
-  usage
-  exit 1
-fi
+      if n + 1 < len(lines):
+        tee("\n")
+        start_of_line = True
 
-dev="/dev/$1"
+  if proc.returncode is not 0:
+    if not start_of_line:
+      tee("\n")
 
-if [[ ! -e "$dev" ]]; then
-  echo "could not find device $dev" 1>&2
-  exit 1
-fi
+    raise ProcessError("badblocks failed")
 
-smartinfo=$(smartctl -i /dev/$1)
+def run_smart_test(type):
+  print_msg("===== Start SMART %s Test on %s" % (type.upper(), dev))
 
-make=$(find_make "$smartinfo")
-model=$(find_model "$smartinfo")
-serial=$(find_serial "$smartinfo")
+  if run:
+    print_msg(clean_smartctl(run_smartctl_process("--test", type, dev)))
 
-if [[ -z "$make" ]] || [[ -z "$model" ]] || [[ -z "$serial" ]]; then
-  echo "unable to determine drive make, model, and serial" 1>&2
-  exit 1
-fi
+    wait_for_smart_test(type)
 
-if [[ "$CONSENT" != "1" ]]; then
-  echo "This script will erase all data on $dev. Any other processes trying to use it will fail."
-  echo "The make, model, and serial for this drive is $make $model $serial. Confirm this is the right drive."
-  echo "And you really really really should be running this inside of screen or tmux."
-  read -p "Are you sure you wish to proceed? [yN] " -n 1 -r
+    print_msg("SMART Test finished")
+  else:
+    print_msg("Not running SMART test because this is a dry run")
 
-  [[ "$REPLY" != "" ]] && echo;
+  show_smart_data()
 
-  if [[ "${REPLY^^}" != "Y" ]]; then
-    echo "Aborting..."
-    exit 1
-  fi
-fi
+  print_msg("===== Finish SMART %s Test on %s" % (type.upper(), dev))
 
-dir=${DIR%%/}
+def run_smartctl_process(*args):
+  proc = subprocess.run(["smartctl"] + list(args), stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+  output = proc.stdout.decode(sys.getdefaultencoding())
 
-if [[ "$LOG" == "auto" ]]; then
-  bb_file="$dir/burnin_${make}_${model}_${serial}.badblocks"
-  log_file="$dir/burnin_${make}_${model}_${serial}.log"
-else
-  bb_file="$dir/$LOG.badblocks"
-  log_file="$dir/$LOG.log"
-fi
+  # if proc.returncode is not 0:
+  #   raise ProcessError(output + "smartctl failed")
 
-[[ ! -d "$dir" ]] && mkdir -p "$dir"
+  return output
 
-rm -f "$bb_file"
-rm -f "$log_file"
+def show_smart_data():
+  print_msg(clean_smartctl(run_smartctl_process("--health", dev)))
+  print_msg(clean_smartctl(run_smartctl_process("--attributes", dev)))
+  print_msg(clean_smartctl(run_smartctl_process("--log", "error", dev)))
+  print_msg(clean_smartctl(run_smartctl_process("--log", "selftest", dev)))
 
-puts "burnin-drive"
-puts "https://github.com/samuelkadolph/burnin-drive"
+def tee(string):
+  sys.stdout.write(string)
+  sys.stdout.flush()
+  log_file.write(string)
+  log_file.flush()
 
-puts "===== Run Info"
-puts "Device: $1"
-puts "Make: $make"
-puts "Model: $model"
-puts "Serial: $serial"
-puts "badblocks File: $bb_file"
-puts "Log File: $log_file"
-puts "Dry Run: $([ "$RUN" == 1 ] && echo "No" || echo "Yes")"
+def wait_for_smart_test(type):
+  print_msg("Waiting for SMART Test to finish")
 
-puts "===== Raw SMART Info"
-my_smartctl --info "$dev"
+  while True:
+    status = run_smartctl_process("--capabilities", dev)
 
-run_smart_test short
-run_badblocks
-run_smart_test short
-run_smart_test long
+    if "Self-test execution status" in status:
+      if "Self-test routine in progress" not in status:
+        break
+    else:
+      status = run_smartctl_process("--log", "selftest", dev)
+
+      if re.search(r"^#\s1\s.*(Aborted|Completed|Failed)", status, re.MULTILINE):
+        break
+
+    if type is "long":
+      time.sleep(SMART_LONG_POLL)
+    else:
+      time.sleep(SMART_SHORT_POLL)
+
+signal.signal(signal.SIGINT, handle_interrupt)
+
+parser = argparse.ArgumentParser(description="Burnin a drive with SMART tests and badblocks")
+parser.add_argument("-d", "--dir", type=str, help="specify the output directory for the results")
+parser.add_argument("-l", "--log", type=str, help="specify the filename for the results")
+parser.add_argument("-y", "--yes", action="store_true", help="confirm consent to erase drive")
+group = parser.add_mutually_exclusive_group()
+group.add_argument("-m", "--dry-run", action="store_true", help="perform a dry run (default)")
+group.add_argument("-r", "--run", action="store_true", help="perform a real run")
+parser.add_argument("drive")
+args = parser.parse_args()
+
+if os.geteuid() is not 0:
+  print("%s must be run as root" % parser.pro, file=sys.stderr)
+  exit(1)
+
+if not shutil.which("smartctl"):
+  print("could not find smartctl, please install it", file=sys.stderr)
+  exit(1)
+
+if not shutil.which("badblocks"):
+  print("could not find badblocks, please install it", file=sys.stderr)
+  exit(1)
+
+dev = args.drive
+
+if not os.path.exists(dev):
+  print("could not find device: '%s'" % dev, file=sys.stderr)
+  exit(1)
+
+smartinfo = run_smartctl_process("--info", dev)
+
+make = find_make(smartinfo)
+model = find_model(smartinfo)
+serial = find_serial(smartinfo)
+
+if not make or not model or not serial:
+  print("unable to determine drive make, model, and serial for '%s" % dev, file=sys.stderr)
+  exit(1)
+
+if not args.yes:
+  print("This script will erase all data on $dev. Any other processes trying to use it will fail.")
+  print("The make, model, and serial for this drive is %s %s %s. Confirm this is the right drive." % (make, model, serial))
+  print("And you really really really should be running this inside of screen or tmux.")
+  # TODO getch
+
+dir = args.dir if args.dir else os.getcwd()
+
+if args.log:
+  bb_file_path = os.path.join(dir, "%s.badblocks" % args.log)
+  log_file_path = os.path.join(dir, "%s.log" % args.log)
+else:
+  bb_file_path = os.path.join(dir, "burnin_%s_%s_%s.badblocks" % (make, model, serial))
+  log_file_path = os.path.join(dir, "burnin_%s_%s_%s.log" % (make, model, serial))
+
+try:
+  os.makedirs(dir)
+except OSError as e:
+  if e.errno != errno.EEXIST:
+      raise
+
+try:
+  os.remove(bb_file_path)
+except OSError:
+  pass
+
+try:
+  os.remove(log_file_path)
+except OSError:
+  pass
+
+log_file = open(log_file_path, "w")
+run = not args.dry_run and args.run
+
+print_msg("burnin-drive")
+print_msg("https://github.com/samuelkadolph/burnin-drive")
+
+print_msg("===== Run Info")
+print_msg("Device: %s" % dev)
+print_msg("Make: %s" % make)
+print_msg("Model: %s" % model)
+print_msg("Serial: %s" % serial)
+print_msg("badblocks File: %s" % bb_file_path)
+print_msg("Log File: %s" % log_file_path)
+print_msg("Dry Run: %s" % str(not run))
+
+print_msg("===== Raw SMART Info")
+print_msg(clean_smartctl(smartinfo))
+
+try:
+  run_smart_test("short")
+  run_badblocks()
+  run_smart_test("short")
+  run_smart_test("long")
+except ProcessError as e:
+  print_msg(e.message)
+  exit(1)
