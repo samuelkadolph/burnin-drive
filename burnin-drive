@@ -62,37 +62,41 @@ def clean_smartctl(output):
   return os.linesep.join([s for s in output.splitlines()[4:] if s is not ""])
 
 def find_make(smartinfo):
-  match = re.search(r"^Vendor: +(.*)$", smartinfo, re.MULTILINE)
+  match = re.search(r"^Vendor: +(\w+)$", smartinfo, re.MULTILINE)
   if match:
     return match.group(1)
 
-  match = re.search(r"^Device Model: +([^ ]+).*$", smartinfo, re.MULTILINE)
+  match = re.search(r"^Model Family: +(\w+).*$", smartinfo, re.MULTILINE)
   if match:
     return match.group(1)
 
-  match = re.search(r"^Model Number: +([^ ]+).*$", smartinfo, re.MULTILINE)
+  match = re.search(r"^Device Model: +(\w+).*$", smartinfo, re.MULTILINE)
+  if match:
+    return match.group(1)
+
+  match = re.search(r"^Model Number: +(\w+).*$", smartinfo, re.MULTILINE)
   if match:
     return match.group(1)
 
   return None
 
 def find_model(smartinfo):
-  match = re.search(r"^Product: +(.*)$", smartinfo, re.MULTILINE)
+  match = re.search(r"^Product: +([\w-]+)$", smartinfo, re.MULTILINE)
   if match:
     return match.group(1)
 
-  match = re.search(r"^Device Model: +[^ ]+ +(.*)$", smartinfo, re.MULTILINE)
+  match = re.search(r"^Device Model: +(?:[\w-]+ +)?([\w-]+)$", smartinfo, re.MULTILINE)
   if match:
     return match.group(1)
 
-  match = re.search(r"^Model Number: +[^ ]+ +(.*)$", smartinfo, re.MULTILINE)
+  match = re.search(r"^Model Number: +(?:[\w-]+ +)?([\w-]+)$", smartinfo, re.MULTILINE)
   if match:
     return match.group(1)
 
   return None
 
 def find_serial(smartinfo):
-  match = re.search(r"^Serial [Nn]umber: +(.*)$", smartinfo, re.MULTILINE)
+  match = re.search(r"^Serial [Nn]umber: +([\w-]+)$", smartinfo, re.MULTILINE)
   if match:
     return match.group(1)
 
