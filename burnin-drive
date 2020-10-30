@@ -59,7 +59,7 @@ class ProcessError(Exception):
     self.message = message
 
 def clean_smartctl(output):
-  return os.linesep.join([s for s in output.splitlines()[4:] if s is not ""])
+  return os.linesep.join([s for s in output.splitlines()[4:] if s != ""])
 
 def find_make(smartinfo):
   match = re.search(r"^Vendor: +(\w+)$", smartinfo, re.MULTILINE)
@@ -137,7 +137,7 @@ def run_badblocks_process(*args):
         tee("%s | " % get_time())
         start_of_line = False
 
-      if line is not "":
+      if line != "":
         safe_line = re.sub(r" *[\d.]+% done, [\d:]+ elapsed\. \(.* errors\)", "", line)
         safe_line = re.sub(r"\x08+", "", safe_line)
 
@@ -155,7 +155,7 @@ def run_badblocks_process(*args):
         tee("\n")
         start_of_line = True
 
-  if proc.returncode is not 0:
+  if proc.returncode != 0:
     if not start_of_line:
       tee("\n")
 
@@ -213,7 +213,7 @@ def wait_for_smart_test(type):
       if re.search(r"^#\s1\s.*(Aborted|Completed|Failed)", status, re.MULTILINE):
         break
 
-    if type is "long":
+    if type == "long":
       time.sleep(SMART_LONG_POLL)
     else:
       time.sleep(SMART_SHORT_POLL)
@@ -230,7 +230,7 @@ group.add_argument("-r", "--run", action="store_true", help="perform a real run"
 parser.add_argument("drive")
 args = parser.parse_args()
 
-if os.geteuid() is not 0:
+if os.geteuid() != 0:
   print("%s must be run as root" % parser.pro, file=sys.stderr)
   exit(1)
 
