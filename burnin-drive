@@ -109,18 +109,18 @@ def handle_interrupt(sig, frame):
   print("interrupted", file=sys.stderr)
   exit(1)
 
-def print_msg(message):
+def log(message):
   tee(re.sub(r"^", get_time() + " | ", message, flags=re.MULTILINE) + "\n")
 
 def run_badblocks():
-  print_msg("===== Start badblocks on %s" % dev)
+  log("===== Start badblocks on %s" % dev)
 
   if run:
     run_badblocks_process("-o", bb_file_path, dev)
   else:
-    print_msg("Not running badblocks because this is a dry run")
+    log("Not running badblocks because this is a dry run")
 
-  print_msg("===== Finish badblocks on %s" % dev)
+  log("===== Finish badblocks on %s" % dev)
 
 def run_badblocks_process(*args):
   proc = subprocess.Popen(["badblocks", "-svw", "-b", "4096"] + list(args), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, close_fds=True)
@@ -162,20 +162,20 @@ def run_badblocks_process(*args):
     raise ProcessError("badblocks failed")
 
 def run_smart_test(type):
-  print_msg("===== Start SMART %s Test on %s" % (type.upper(), dev))
+  log("===== Start SMART %s Test on %s" % (type.upper(), dev))
 
   if run:
-    print_msg(clean_smartctl(run_smartctl_process("--test", type, dev)))
+    log(clean_smartctl(run_smartctl_process("--test", type, dev)))
 
     wait_for_smart_test(type)
 
-    print_msg("SMART Test finished")
+    log("SMART Test finished")
   else:
-    print_msg("Not running SMART test because this is a dry run")
+    log("Not running SMART test because this is a dry run")
 
   show_smart_data()
 
-  print_msg("===== Finish SMART %s Test on %s" % (type.upper(), dev))
+  log("===== Finish SMART %s Test on %s" % (type.upper(), dev))
 
 def run_smartctl_process(*args):
   proc = subprocess.run(["smartctl"] + list(args), stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
@@ -187,10 +187,10 @@ def run_smartctl_process(*args):
   return output
 
 def show_smart_data():
-  print_msg(clean_smartctl(run_smartctl_process("--health", dev)))
-  print_msg(clean_smartctl(run_smartctl_process("--attributes", dev)))
-  print_msg(clean_smartctl(run_smartctl_process("--log", "error", dev)))
-  print_msg(clean_smartctl(run_smartctl_process("--log", "selftest", dev)))
+  log(clean_smartctl(run_smartctl_process("--health", dev)))
+  log(clean_smartctl(run_smartctl_process("--attributes", dev)))
+  log(clean_smartctl(run_smartctl_process("--log", "error", dev)))
+  log(clean_smartctl(run_smartctl_process("--log", "selftest", dev)))
 
 def tee(string):
   sys.stdout.write(string)
@@ -199,7 +199,7 @@ def tee(string):
   log_file.flush()
 
 def wait_for_smart_test(type):
-  print_msg("Waiting for SMART Test to finish")
+  log("Waiting for SMART Test to finish")
 
   while True:
     status = run_smartctl_process("--capabilities", dev)
@@ -259,10 +259,13 @@ if not make or not model or not serial:
   exit(1)
 
 if not args.yes:
-  print("This script will erase all data on $dev. Any other processes trying to use it will fail.")
+  print("This script will erase all data on %s. Any other processes trying to use it will fail." % (dev))
   print("The make, model, and serial for this drive is %s %s %s. Confirm this is the right drive." % (make, model, serial))
   print("And you really really really should be running this inside of screen or tmux.")
-  # TODO getch
+  print("Proceed? [yN] ", end="", flush=True)
+
+  if sys.stdin.readline().rstrip().lower() != "y":
+    exit()
 
 dir = args.dir if args.dir else os.getcwd()
 
@@ -292,20 +295,20 @@ except OSError:
 log_file = open(log_file_path, "w")
 run = not args.dry_run and args.run
 
-print_msg("burnin-drive")
-print_msg("https://github.com/samuelkadolph/burnin-drive")
+log("burnin-drive")
+log("https://github.com/samuelkadolph/burnin-drive")
 
-print_msg("===== Run Info")
-print_msg("Device: %s" % dev)
-print_msg("Make: %s" % make)
-print_msg("Model: %s" % model)
-print_msg("Serial: %s" % serial)
-print_msg("badblocks File: %s" % bb_file_path)
-print_msg("Log File: %s" % log_file_path)
-print_msg("Dry Run: %s" % str(not run))
+log("===== Run Info")
+log("Device: %s" % dev)
+log("Make: %s" % make)
+log("Model: %s" % model)
+log("Serial: %s" % serial)
+log("badblocks File: %s" % bb_file_path)
+log("Log File: %s" % log_file_path)
+log("Dry Run: %s" % str(not run))
 
-print_msg("===== Raw SMART Info")
-print_msg(clean_smartctl(smartinfo))
+log("===== Raw SMART Info")
+log(clean_smartctl(smartinfo))
 
 try:
   run_smart_test("short")
@@ -313,5 +316,5 @@ try:
   run_smart_test("short")
   run_smart_test("long")
 except ProcessError as e:
-  print_msg(e.message)
+  log(e.message)
   exit(1)
