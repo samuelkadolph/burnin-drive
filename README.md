@@ -1,14 +1,14 @@
 # burnin-drive
 
 `burnin-drive` is a script I wrote to test hard drives before you put them into
-use or in case of a RMA.
+use or testing for an RMA.
 
 ## Usage
 
 ```
 git clone https://github.com/samuelkadolph/burnin-drive
 cd burnin-drive
-sudo ./burnin-drive --run --yes sdX
+sudo ./burnin-drive -d test-results -r /dev/da0
 ```
 
 ## Tested Drives

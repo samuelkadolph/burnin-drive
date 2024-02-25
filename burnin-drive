@@ -2,7 +2,7 @@
 
 # burnin-drive
 #
-# usage: burnin-drive [-h] [-d DIR] [-l LOG] [-y] [-m | -r] drive
+# usage: burnin-drive [-h] [-d DIR] [-f FILE] [-l LOG] [-y] [-m | -r] drive
 #
 # Burnin a drive with SMART tests and badblocks
 #
@@ -10,12 +10,13 @@
 #   drive
 #
 # optional arguments:
-#   -h, --help         show this help message and exit
-#   -d DIR, --dir DIR  specify the output directory for the results
-#   -l LOG, --log LOG  specify the filename for the results
-#   -y, --yes          confirm consent to erase drive
-#   -m, --dry-run      perform a dry run (default)
-#   -r, --run          perform a real run
+#   -h, --help            show this help message and exit
+#   -d DIR, --dir DIR     specify the output directory for the results
+#   -f FILE, --file FILE  specify the filename for the results (supports strftime and {make} {model} {serial} substitutions)
+#   -l LOG, --log LOG     specify the log time format
+#   -y, --yes             confirm consent to erase drive
+#   -m, --dry-run         perform a dry run (default)
+#   -r, --run             perform a real run
 #
 # MIT License
 #
@@ -61,6 +62,10 @@ class ProcessError(Exception):
 def clean_smartctl(output):
   return os.linesep.join([s for s in output.splitlines()[4:] if s != ""])
 
+def fatal(message):
+  print(message, file=sys.stderr)
+  exit(1)
+
 def find_make(smartinfo):
   match = re.search(r"^Vendor: +(\w+)$", smartinfo, re.MULTILINE)
   if match:
@@ -103,11 +108,10 @@ def find_serial(smartinfo):
   return None
 
 def get_time():
-  return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S %Z")
+  return datetime.now(timezone.utc).strftime(log_time_format)
 
 def handle_interrupt(sig, frame):
-  print("interrupted", file=sys.stderr)
-  exit(1)
+  fatal("interrupted")
 
 def log(message):
   tee(re.sub(r"^", get_time() + " | ", message, flags=re.MULTILINE) + "\n")
@@ -222,7 +226,8 @@ signal.signal(signal.SIGINT, handle_interrupt)
 
 parser = argparse.ArgumentParser(description="Burnin a drive with SMART tests and badblocks")
 parser.add_argument("-d", "--dir", type=str, help="specify the output directory for the results")
-parser.add_argument("-l", "--log", type=str, help="specify the filename for the results")
+parser.add_argument("-f", "--file", type=str, help="specify the filename for the results (supports strftime and {make} {model} {serial} substitutions)")
+parser.add_argument("-l", "--log", type=str, help="specify the log time format")
 parser.add_argument("-y", "--yes", action="store_true", help="confirm consent to erase drive")
 group = parser.add_mutually_exclusive_group()
 group.add_argument("-m", "--dry-run", action="store_true", help="perform a dry run (default)")
@@ -231,22 +236,16 @@ parser.add_argument("drive")
 args = parser.parse_args()
 
 if os.geteuid() != 0:
-  print("%s must be run as root" % parser.pro, file=sys.stderr)
-  exit(1)
-
+  fatal("%s must be run as root" % parser.prog)
 if not shutil.which("smartctl"):
-  print("could not find smartctl, please install it", file=sys.stderr)
-  exit(1)
-
+  fatal("could not find smartctl, please install it")
 if not shutil.which("badblocks"):
-  print("could not find badblocks, please install it", file=sys.stderr)
-  exit(1)
+  fatal("could not find badblocks, please install it")
 
 dev = args.drive
 
 if not os.path.exists(dev):
-  print("could not find device: '%s'" % dev, file=sys.stderr)
-  exit(1)
+  fatal("could not find device: '%s'" % dev)
 
 smartinfo = run_smartctl_process("--info", dev)
 
@@ -255,32 +254,30 @@ model = find_model(smartinfo)
 serial = find_serial(smartinfo)
 
 if not make or not model or not serial:
-  print("unable to determine drive make, model, and serial for '%s" % dev, file=sys.stderr)
-  exit(1)
+  fatal("unable to determine drive make, model, and serial for '%s" % dev)
 
 if not args.yes:
   print("This script will erase all data on %s. Any other processes trying to use it will fail." % (dev))
   print("The make, model, and serial for this drive is %s %s %s. Confirm this is the right drive." % (make, model, serial))
   print("And you really really really should be running this inside of screen or tmux.")
   print("Proceed? [yN] ", end="", flush=True)
-
   if sys.stdin.readline().rstrip().lower() != "y":
     exit()
 
 dir = args.dir if args.dir else os.getcwd()
+file = args.file if args.file else "%Y%m%d_{make}_{model}_{serial}"
+file = file.format(make = make, model = model, serial = serial)
+file = datetime.now(timezone.utc).strftime(file)
+log_time_format = args.log if args.log else "%Y-%m-%d %H:%M:%S %Z"
 
-if args.log:
-  bb_file_path = os.path.join(dir, "%s.badblocks" % args.log)
-  log_file_path = os.path.join(dir, "%s.log" % args.log)
-else:
-  bb_file_path = os.path.join(dir, "burnin_%s_%s_%s.badblocks" % (make, model, serial))
-  log_file_path = os.path.join(dir, "burnin_%s_%s_%s.log" % (make, model, serial))
+bb_file_path = os.path.join(dir, "%s.badblocks" % file)
+log_file_path = os.path.join(dir, "%s.log" % file)
 
 try:
   os.makedirs(dir)
 except OSError as e:
   if e.errno != errno.EEXIST:
-      raise
+    raise
 
 try:
   os.remove(bb_file_path)
@@ -303,7 +300,7 @@ log("Device: %s" % dev)
 log("Make: %s" % make)
 log("Model: %s" % model)
 log("Serial: %s" % serial)
-log("badblocks File: %s" % bb_file_path)
+log("Badblocks File: %s" % bb_file_path)
 log("Log File: %s" % log_file_path)
 log("Dry Run: %s" % str(not run))
 
