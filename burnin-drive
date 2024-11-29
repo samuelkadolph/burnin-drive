@@ -127,7 +127,7 @@ def run_badblocks():
   log("===== Finish badblocks on %s" % dev)
 
 def run_badblocks_process(*args):
-  proc = subprocess.Popen(["badblocks", "-svw", "-b", "4096"] + list(args), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, close_fds=True)
+  proc = subprocess.Popen(["badblocks", "-svw", "-b", "16384"] + list(args), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, close_fds=True)
   start_of_line = True
 
   while proc.poll() is None:
